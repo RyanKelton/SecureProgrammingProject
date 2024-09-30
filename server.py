@@ -40,6 +40,7 @@ async def handle_hello_message(websocket, message):
             }
         }
         await websocket.send(json.dumps(response))
+        print("Sent hello message with public key.")
 
 # Handle chat messages
 async def handle_chat_message(websocket, message):
@@ -59,20 +60,23 @@ async def handle_chat_message(websocket, message):
 
 # Handle public chat messages
 async def handle_public_chat_message(message):
-    print(f"Broadcasting public message to all clients.")
+    print(f"Broadcasting public message to all clients:\n" + json.dumps(message))
     await broadcast_message(json.dumps(message))
 
 # Message handler to process incoming messages
 async def handle_message(websocket, message):
-    message_data = json.loads(message)
-    message_type = message_data.get('data', {}).get('type')
+    try:
+        message_data = json.loads(message)
+        message_type = message_data.get('data', {}).get('type')
 
-    if message_type == "hello":
-        await handle_hello_message(websocket, message_data)
-    elif message_type == "chat":
-        await handle_chat_message(websocket, message_data)
-    elif message_type == "public_chat":
-        await handle_public_chat_message(message_data)
+        if message_type == "hello":
+            await handle_hello_message(websocket, message_data)
+        elif message_type == "chat":
+            await handle_chat_message(websocket, message_data)
+        elif message_type == "public_chat":
+            await handle_public_chat_message(message_data)
+    except Exception as e:
+        print(f"Error handling message: {e}")
 
 # WebSocket server handler
 async def server_handler(websocket, path):
@@ -89,4 +93,5 @@ async def start_server():
     await server.wait_closed()
 
 if __name__ == "__main__":
+    print("Server")
     asyncio.run(start_server())
