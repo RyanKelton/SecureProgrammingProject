@@ -7,7 +7,7 @@ Overview
 
 This project is a basic chat application using WebSocket protocol with RSA encryption for key exchange and AES for message encryption with the functionalities of both public and private chats. Here, each client will be able to be identified through their public key fingerprint whilst messages between clients will be encrypted.
 
-Requirements
+**Requirements**
 To compile and run the code, you will need the following dependencies installed:
 -	Python 3.x
 -	asyncio
@@ -15,12 +15,14 @@ To compile and run the code, you will need the following dependencies installed:
 -	websockets
 -	pycryptodome for AES encryption (pip install pycryptodome)
 -	termcolor (pip install termcolor)
-Files
+
+
+**Files**
 There are two files in this chat application.
 -	server.py handles the server connections and routing of messages.
 -	Client.py handles the client-side implementation of the chat app. 
 
-Steps to run the code 
+**Steps to run the code **
 1.	Make sure all requirements are installed as specified above.
 2.	Start the server
 The server will start on ws://localhost:6666 by default. It listens for incoming client connections and broadcasts messages.
