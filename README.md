@@ -20,7 +20,7 @@ There are two files in this chat application.
 -	server.py handles the server connections and routing of messages.
 -	Client.py handles the client-side implementation of the chat app. 
 
-**Steps to run the code **
+**Steps to run the code**
 1.	Make sure all requirements are installed as specified above.
 2.	Start the server
 The server will start on ws://localhost:6666 by default. It listens for incoming client connections and broadcasts messages.
@@ -46,9 +46,11 @@ Example:
 > Hello everyone!
 
 2.	Sending a private message:
+
 /msg alice Hi Alice, can we talk privately?
 
-3.	Leaving the chat:
+4.	Leaving the chat:
+
 /quit
 
 Notes for Other Groups
