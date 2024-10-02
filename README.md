@@ -1,6 +1,4 @@
 ﻿# SecureProgrammingProject
-
- Here is a README.txt example for your project:
  
 README for OLAF Chat Application
 Overview
