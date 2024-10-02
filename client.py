@@ -170,8 +170,9 @@ async def client_input_loop(websocket, queue):
     while True:
         command = await queue.get()  # Get the command from the queue
         if command.startswith("/msg "):
-            _, recipient_username, message = command.split(" ", 2)
-            await send_chat_message(websocket, recipient_username, message)
+            # _, recipient_username, message = command.split(" ", 2)
+            # await send_chat_message(websocket, recipient_username, message)
+            print(colored("Not implemented yet", 'red'))
         elif command == "/quit":
             print(colored("Exiting...", 'red'))
             await websocket.close()
