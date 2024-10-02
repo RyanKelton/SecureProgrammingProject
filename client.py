@@ -8,8 +8,12 @@ import sys
 import selectors
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
+from termcolor import colored
+from getpass import getpass
 
+exit_flag = False
 fingerprint = "N/A"
+username = ""  # Define username as a global variable
 
 # Step 1: Generate RSA key pair
 def generate_rsa_key_pair():
@@ -25,22 +29,26 @@ public_key_pem = public_key.save_pkcs1().decode('utf-8')
 class ConnectionClosedException(Exception):
     pass
 
+
+
 # Step 2: Send "hello" message with public key
 async def send_hello_message(websocket):
     hello_message = {
         "data": {
             "type": "hello",
-            "public_key": public_key_pem
+            "public_key": public_key_pem,
+            "username": username  # Include username in the hello message
         }
     }
     await websocket.send(json.dumps(hello_message))
 
+
+
 def handle_hello_ack(message_data):
     global fingerprint
     fingerprint = message_data['data']['fingerprint']
-    message = message_data['data']['message']
-    print(f"Server response: {message}")
-    print(f"Your client fingerprint: {fingerprint}")
+    print(colored("\nConnected to the chat room!\nEnter anything to send a public chat\nUse /msg (username) to send private messages\nUse /quit to leave\nEnjoy!\n", 'red'))
+
 
 
 # Step 3: Handle incoming messages
@@ -74,7 +82,7 @@ def decrypt_chat_message(message_data):
 
 
 def handle_public_chat(message_data):
-    print(f"Public message from {message_data['data']['sender']}: {message_data['data']['message']}")
+    print(f"{message_data['data']['username']} >>" + colored(f" {message_data['data']['message']}", 'grey'))
 
 
 
@@ -109,47 +117,64 @@ async def send_public_chat_message(websocket, message):
         "data": {
             "type": "public_chat",
             "sender": fingerprint,
+            "username": username,
             "message": message
         }
     }
     await websocket.send(json.dumps(chat_message))    
 
 
+
 async def read_input(queue):
+    global exit_flag
     while True:
-        command = await asyncio.get_event_loop().run_in_executor(None, input, "")  # Non-blocking input
+        command = await asyncio.get_event_loop().run_in_executor(None, input)  # Non-blocking input
         if command:  # Only put non-empty commands in the queue
+            sys.stdout.write("\033[F\033[K")  # Moves cursor up one line and clears the line
+            sys.stdout.flush()
+            
             await queue.put(command)
+        if exit_flag:
+            break
+
 
 
 # Step 5: Input loop for user to send messages or quit
 async def client_input_loop(websocket, queue):
+    global exit_flag
     while True:
-        print("Enter command ((msg <recipient_public_key_pem> <server>)/public <message>, or quit): ")
         command = await queue.get()  # Get the command from the queue
-        if command.startswith("msg"):
+        if command[0] == "/msg":
             # _, recipient_public_key_pem, recipient_server, message = command.split(" ", 3)
             # await send_chat_message(websocket, recipient_public_key_pem, message, recipient_server)
-            print("not implemented yet")
-        elif command.startswith("public"):
-            _, message = command.split(" ", 1)
-            await send_public_chat_message(websocket, message)
-        elif command == "quit":
-            print("Exiting...")
+            print(colored("Not implemented yet", 'red'))
+        elif command == "/quit":
+            print(colored("Exiting...", 'red'))
+            await websocket.close()
+            exit_flag = True
             break
         else:
-            print("Invalid command. Please enter a valid command.")
+            await send_public_chat_message(websocket, command)
+        
+        if exit_flag:
+            break
+
 
 
 # Step 6: Listen for incoming messages
 async def listen_for_messages(websocket):
-    try:
-        while True:
-            message = await websocket.recv()
+    while True:
+        try:
+            message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
             handle_incoming_message(message)  # Process the incoming message
-    except websockets.ConnectionClosed as e:
-        print(f"Connection closed with code: {e.code}, reason: {e.reason}")  # Log reason for closure
-        raise ConnectionClosedException("Connection dropped.")
+        except asyncio.TimeoutError:
+            continue
+        except websockets.ConnectionClosed as e:
+            print(colored("Connection closed", 'red'))  # Log reason for closure
+            exit_flag = True
+            break
+        except Exception as e:
+            print(f"Error: {e}")
 
 
 
@@ -173,12 +198,12 @@ async def connect_to_server(server_url):
         
         
 
-
-
 # Step 8: Main function to start the client
 async def main():
     try:
+        global username  # Declare username as global
         server_url = input("Enter server WebSocket URL: ")
+        username = input("Enter your username: ")
         await connect_to_server(server_url)
     except ConnectionClosedException as e:
         print(e)

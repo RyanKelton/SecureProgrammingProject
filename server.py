@@ -12,13 +12,23 @@ clients = {}
 
 # Function to broadcast a message to all clients
 async def broadcast_message(message):
-    for client in clients.values():
-        await client['websocket'].send(message)
+    disconnected_clients = []
+    for fingerprint, client in clients.items():
+        try:
+            await client['websocket'].send(message)
+        except websockets.exceptions.ConnectionClosed:
+            print(f"Client {fingerprint} disconnected (failed to send)")
+            disconnected_clients.append(fingerprint)
+
+    # Optionally remove disconnected clients from the list
+    for fingerprint in disconnected_clients:
+        del clients[fingerprint]
 
 # Handle "hello" message and store public key
 async def handle_hello_message(websocket, message):
     client_data = message.get('data', {})
     public_key_pem = client_data.get('public_key')
+    username = client_data.get('username')
     
     if public_key_pem:
         # Decode the client's public key from PEM
@@ -28,19 +38,20 @@ async def handle_hello_message(websocket, message):
         fingerprint = base64.b64encode(hashlib.sha256(public_key_pem.encode('utf-8')).digest()).decode('utf-8')
 
         # Store the client's info (WebSocket connection and public key)
-        clients[fingerprint] = {'websocket': websocket, 'public_key': public_key}
-        print(f"Client {fingerprint} connected with public key.")
+        clients[fingerprint] = {'websocket': websocket, 'public_key': public_key, 'username': username}
+        print(f"Client {fingerprint} connected with public key and username: {username}")
 
         # Send back a confirmation message
         response = {
             "data": {
                 "type": "hello_ack",
                 "message": "Hello received, client registered",
-                "fingerprint": fingerprint
+                "fingerprint": fingerprint,
+                "username": username  # Include the username in the acknowledgment
             }
         }
         await websocket.send(json.dumps(response))
-        print("Sent hello message with public key.")
+        print("Sent hello message with public key and username.")
 
 # Handle chat messages
 async def handle_chat_message(websocket, message):
