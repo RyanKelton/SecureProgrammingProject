@@ -53,9 +53,13 @@ Example:
 
 Notes for Other Groups
 •	Chat application is a work in progress, we have not fully implemented the parts to handle neighbour servers*. So currently it is just one server whilst still adhering to the protocol
+
 •	There are some vulnerabilities in the chat application.
+
 •	We have standardized the OLAF protocol (v1.1.3). This implementation sends RSA public keys as part of the "hello" message and uses the public key's fingerprint to identify clients. Ensure that your client implementation can handle this format.
+
 •	To send private messages, our clients use the /msg <username> command, where the username is the public key fingerprint.
+
 •	The server is responsible for forwarding public and private messages. If you implement a server, make sure to handle WebSocket message forwarding appropriately.
 
 
