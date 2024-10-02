@@ -67,17 +67,21 @@ def handle_incoming_message(message):
 
 
 def decrypt_chat_message(message_data):
-    encrypted_aes_key = base64.b64decode(message_data['data']['symm_keys'][0])
-    iv = base64.b64decode(message_data['data']['iv'])
-    encrypted_chat = base64.b64decode(message_data['data']['chat'])
+    # encrypted_aes_key = base64.b64decode(message_data['data']['symm_keys'][0])
+    # iv = base64.b64decode(message_data['data']['iv'])
+    # encrypted_chat = base64.b64decode(message_data['data']['chat'])
 
-    # Decrypt AES key with private RSA key
-    aes_key = rsa.decrypt(encrypted_aes_key, private_key)
+    # # Decrypt AES key with private RSA key
+    # aes_key = rsa.decrypt(encrypted_aes_key, private_key)
 
-    # Decrypt chat message with AES key
-    cipher = AES.new(aes_key, AES.MODE_GCM, iv)
-    plaintext = cipher.decrypt(encrypted_chat).decode('utf-8')
-    print(f"Received message: {plaintext}")
+    # # Decrypt chat message with AES key
+    # cipher = AES.new(aes_key, AES.MODE_GCM, iv)
+    # plaintext = cipher.decrypt(encrypted_chat).decode('utf-8')
+    # print(f"Received message: {plaintext}")
+    sender = message_data["chat"]["participants"][0]
+    message_text = message_data["chat"]["message"]
+    
+    print(colored(f"{sender} to you >> {message_text}", 'magenta'))
 
 
 
@@ -87,7 +91,7 @@ def handle_public_chat(message_data):
 
 
 # Step 4: Send encrypted chat message
-# async def send_chat_message(websocket, recipient_fingerprint, message, recipient_server):
+async def send_chat_message(websocket, recipient_username, message):
     # aes_key = get_random_bytes(32)
     # iv = get_random_bytes(16)
     
@@ -99,17 +103,22 @@ def handle_public_chat(message_data):
     # recipient_public_key = rsa.PublicKey.load_pkcs1(recipient_public_key_pem.encode('utf-8'))
     # encrypted_aes_key = rsa.encrypt(aes_key, recipient_public_key)
     
-
-    # chat_message = {
-    #     "data": {
-    #         "type": "chat",
-    #         "destination_servers": [recipient_server],
-    #         "iv": base64.b64encode(iv).decode('utf-8'),
-    #         "symm_keys": [base64.b64encode(encrypted_aes_key).decode('utf-8')],
-    #         "chat": base64.b64encode(encrypted_message).decode('utf-8')
-    #     }
-    # }
-    # await websocket.send(json.dumps(chat_message))
+    chat_message = {
+        "data": {
+            "type": "chat",
+            # "destination_servers": [recipient_server],
+            # "iv": base64.b64encode(iv).decode('utf-8'),
+            # "symm_keys": [base64.b64encode(encrypted_aes_key).decode('utf-8')],
+            "chat": {
+                "participants": [username, recipient_username],
+                "message": message
+            }
+        }
+    }
+    await websocket.send(json.dumps(chat_message))
+    
+    
+    
 async def send_public_chat_message(websocket, message):
     # b64enc_fingerprint = base64.b64encode(fingerprint)
         
@@ -145,9 +154,8 @@ async def client_input_loop(websocket, queue):
     while True:
         command = await queue.get()  # Get the command from the queue
         if command[0] == "/msg":
-            # _, recipient_public_key_pem, recipient_server, message = command.split(" ", 3)
-            # await send_chat_message(websocket, recipient_public_key_pem, message, recipient_server)
-            print(colored("Not implemented yet", 'red'))
+            _, recipient_username, message = command.split(" ", 2)
+            await send_chat_message(websocket, recipient_username, message)
         elif command == "/quit":
             print(colored("Exiting...", 'red'))
             await websocket.close()
