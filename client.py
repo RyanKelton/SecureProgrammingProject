@@ -12,6 +12,7 @@ from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from termcolor import colored
 from getpass import getpass
+import ssl
 
 exit_flag = False
 fingerprint = "N/A"
@@ -206,10 +207,13 @@ async def listen_for_messages(websocket):
             print(f"Error: {e}")
 
 
-
 # Step 7: Connect to the server and handle communication
 async def connect_to_server(server_url):
-    async with websockets.connect(server_url) as websocket:
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE  # Warning: This disables certificate verification
+
+    async with websockets.connect(server_url, ssl=ssl_context) as websocket:
         # Create a queue for input
         input_queue = asyncio.Queue()
 
@@ -224,22 +228,20 @@ async def connect_to_server(server_url):
 
         # Run the input loop in this task
         await client_input_loop(websocket, input_queue)
-        
-        
 
 # Step 8: Main function to start the client
 async def main():
     try:
         global username  # Declare username as global
         server_url = input("Enter server WebSocket URL: ")
+        if not server_url:
+            server_url = "wss://localhost:6666"  # Default to localhost if no input
         username = input("Enter your username: ")
         await connect_to_server(server_url)
     except ConnectionClosedException as e:
         print(e)
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-
-
 
 # Entry point
 if __name__ == "__main__":
