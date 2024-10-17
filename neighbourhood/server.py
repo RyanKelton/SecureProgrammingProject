@@ -4,13 +4,13 @@ import json
 import base64
 import hashlib
 import rsa
-import sys
 import uuid
 
 # Store connected clients and their public keys
 clients = {}  # Format: {fingerprint: {'websocket': websocket, 'public_key': RSA key, 'username': username}}
 servers = {}  # Format: {server_id: {'websocket': websocket}}
 seen_messages = set()  # Track unique message IDs to prevent loops
+future_servers = {}  # Format: {future_server_uri: retry_attempts}
 
 # Broadcast message to all connected clients with valid WebSocket connections
 async def broadcast_message(message):
@@ -25,6 +25,16 @@ async def broadcast_message(message):
 
     for fingerprint in disconnected_clients:
         del clients[fingerprint]
+
+# Broadcast the message to all other connected servers
+async def broadcast_to_servers(message, exclude_server=None):
+    for server_id, server in servers.items():
+        if server_id != exclude_server and server['websocket']:
+            try:
+                await server['websocket'].send(json.dumps(message))
+                print(f"Message broadcasted to server {server_id}.")
+            except Exception as e:
+                print(f"Error sending to server {server_id}: {e}")
 
 # Forward a message to the destination server if necessary
 async def forward_to_server(destination_server, message):
@@ -95,15 +105,6 @@ async def handle_public_chat_message(message, sender_server=None):
 
     # Broadcast the message to all other servers, excluding the sender server
     await broadcast_to_servers(message, exclude_server=sender_server)
-
-# Broadcast a message to all other servers except the sender server
-async def broadcast_to_servers(message, exclude_server=None):
-    for server_id, server in servers.items():
-        if server_id != exclude_server and server['websocket']:
-            try:
-                await server['websocket'].send(json.dumps(message))
-            except Exception as e:
-                print(f"Error sending to server {server_id}: {e}")
 
 # Handle "client_update" messages between servers
 async def handle_client_update(message):
@@ -179,14 +180,32 @@ async def server_handler(websocket, path):
     except websockets.ConnectionClosed:
         print(f"Client or server disconnected")
 
-# Start the WebSocket server and optionally connect to a neighbor server
-async def start_server(port, neighbour_server_uri=None):
+# Connect to another server with retry logic for future servers
+async def connect_to_neighbour_server(server_uri, server_id):
+    while True:  # Retry loop to connect to neighbor
+        try:
+            async with websockets.connect(server_uri) as websocket:
+                server_hello_message = {"data": {"type": "server_hello", "sender": server_id}}
+                await websocket.send(json.dumps(server_hello_message))
+                print(f"Connected to neighbor server at {server_uri}")
+
+                async for message in websocket:
+                    await handle_message(websocket, message)
+        except Exception as e:
+            print(f"Error connecting to server {server_uri}: {e}")
+            print(f"Retrying connection to {server_uri} in 5 seconds...")
+            await asyncio.sleep(5)  # Retry every 5 seconds
+
+# Start the WebSocket server and optionally connect to a neighbor or future server
+async def start_server(port, neighbour_server_port=None):
     try:
         server = await websockets.serve(server_handler, "localhost", port)
         print(f"Server started at ws://localhost:{port}")
 
-        if neighbour_server_uri:
-            await connect_to_neighbour_server(neighbour_server_uri, f"server-{port}")
+        if neighbour_server_port:
+            # Construct the full URI for the neighboring server
+            neighbour_server_uri = f"ws://localhost:{neighbour_server_port}"
+            asyncio.create_task(connect_to_neighbour_server(neighbour_server_uri, f"server-{port}"))
 
         await server.wait_closed()
     except OSError as e:
@@ -194,25 +213,16 @@ async def start_server(port, neighbour_server_uri=None):
         return False
     return True
 
-# Connect to another server
-async def connect_to_neighbour_server(server_uri, server_id):
-    try:
-        async with websockets.connect(server_uri) as websocket:
-            server_hello_message = {"data": {"type": "server_hello", "sender": server_id}}
-            await websocket.send(json.dumps(server_hello_message))
-            print(f"Connected to neighbor server at {server_uri}")
-
-            async for message in websocket:
-                await handle_message(websocket, message)
-    except Exception as e:
-        print(f"Error connecting to server {server_uri}: {e}")
-
+# Main function to set up the server
 async def main():
     while True:
         port = int(input("Enter the port to start the server on (e.g., 6666): "))
-        neighbor_server_uri = input("Enter the neighbor server URI (leave blank if none): ").strip() or None
+        neighbor_server_port = input("Enter the neighbor server port (leave blank if none): ").strip()
 
-        if await start_server(port, neighbor_server_uri):
+        if neighbor_server_port:
+            neighbor_server_port = int(neighbor_server_port)
+
+        if await start_server(port, neighbor_server_port):
             break
         else:
             retry = input("Do you want to try a different port? (y/n): ").strip().lower()
