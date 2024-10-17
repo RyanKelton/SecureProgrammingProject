@@ -6,6 +6,9 @@ import hashlib
 import rsa
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
+import ssl
+import os
+import subprocess
 
 # Store connected clients and their public keys
 clients = {}
@@ -101,12 +104,35 @@ async def server_handler(websocket, path):
     except websockets.ConnectionClosed:
         print(f"Client disconnected")
 
-# Start the WebSocket server
+def generate_self_signed_cert():
+    if not (os.path.exists('cert.pem') and os.path.exists('key.pem')):
+        print("Generating self-signed certificate...")
+        subprocess.run([
+            'openssl', 'req', '-x509', '-newkey', 'rsa:4096', 
+            '-keyout', 'key.pem', '-out', 'cert.pem', 
+            '-days', '365', '-nodes',
+            '-subj', '/CN=localhost'
+        ], check=True)
+        print("Self-signed certificate generated successfully.")
+    else:
+        print("Certificate files already exist. Using existing files.")
+
 async def start_server():
-    server = await websockets.serve(server_handler, "localhost", 6666)
-    print("Server started at ws://localhost:6666")
+    generate_self_signed_cert()
+    
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain('cert.pem', 'key.pem')
+
+    server = await websockets.serve(
+        server_handler, 
+        "localhost", 
+        6666, 
+        ssl=ssl_context
+    )
+    print("Server started at wss://localhost:6666")
     await server.wait_closed()
 
 if __name__ == "__main__":
     print("Server")
     asyncio.run(start_server())
+
