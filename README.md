@@ -13,6 +13,7 @@ To compile and run the code, you will need the following dependencies installed:
 -	websockets
 -	pycryptodome for AES encryption (pip install pycryptodome)
 -	termcolor (pip install termcolor)
+-	certifi (pip install certifi)
 
 
 **Files**
