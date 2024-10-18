@@ -59,7 +59,7 @@ def check_auth(packet, sender_public_key):
     
     
     # Recreate the concatenated data and counter for signature verification
-    data_counter_concat = json.dumps(data) + str(counter)
+    data_counter_concat = data + str(counter)
     
     # Hash the data using SHA-256
     h = SHA256.new(data_counter_concat.encode('utf-8'))
@@ -71,7 +71,6 @@ def check_auth(packet, sender_public_key):
     try:
         verifier = pss.new(sender_public_key_obj)
         verifier.verify(h, signature)
-        print("DEBUGGING - Signature verified successfully.")
     except (ValueError, TypeError):
         raise ValueError("Signature verification failed.")
     
@@ -101,7 +100,16 @@ def decrypt_chat_message(iv_b64, encrypted_chat_b64, aes_key):
 
 
 # ------------------------------------------------- Handling Incoming Packets ---------------------------------------------
-def handle_chat(data_content):
+def get_public_key_by_username(username):
+    global clients
+    # Find the public key corresponding to the username
+    for f_print, client_data in clients.items():
+        if client_data["username"] == username:
+            return client_data["public_key"]
+    return None
+
+def handle_chat(packet):
+    data_content = json.loads(packet["data"])
     # Get AES key
     symm_keys = data_content["symm_keys"]
     aes_key = decrypt_aes_key(symm_keys)
@@ -119,17 +127,42 @@ def handle_chat(data_content):
     recipeints_str = ", ".join(recipients)
     message = chat_content["message"]
     
+    # Auth
+    sender_public_key = get_public_key_by_username(sender)
+    if sender_public_key is None:
+        print(f"Public key for user {sender} not found. Cannot authenticate")
+        return
+    
+    try:
+        check_auth(packet, sender_public_key)
+    except ValueError as e:
+        print(f"Authentication failed for user {sender}: {str(e)}")
+        return
+    
     print(colored(f"{sender} to ({recipeints_str}) >> {message}", 'magenta'))
     
-    # Auth
-
-
-def handle_public_chat(data_content):
     
-    # Auth
+
+
+def handle_public_chat(packet):
+    data_content = json.loads(packet["data"])
     
     sender_username = data_content["sender_username"]
     message = data_content["message"]
+    
+    # Auth
+    sender_public_key = get_public_key_by_username(sender_username)
+    if sender_public_key is None:
+        print(f"Public key for user {sender_username} not found. Cannot authenticate")
+        return
+    
+    try:
+        check_auth(packet, sender_public_key)
+    except ValueError as e:
+        print(f"Authentication failed for user {sender_username}: {str(e)}")
+        return
+    
+    
     print(f"{sender_username} >>" + colored(f" {message}", 'grey'))
     
     
@@ -138,9 +171,9 @@ def handle_signed_data(packet):
     data_content = json.loads(packet["data"])
     
     if data_content["type"] == "chat":
-        handle_chat(data_content)
+        handle_chat(packet)
     elif data_content["type"] == "public_chat":
-        handle_public_chat(data_content)
+        handle_public_chat(packet)
     
 
 
@@ -270,7 +303,12 @@ def handle_hello_ack(message_data):
     global fingerprint, username
     fingerprint = message_data['fingerprint']
     username = message_data['username']
-    print(colored("\nConnected to the chat room!\nEnter anything to send a public chat\nUse /msg (username) to send private messages\nUse /quit to leave\nEnjoy!\n", 'red'))
+    print(colored("\nConnected to the chat room!", 'red'))
+    print(colored("Enter anything to send a public chat", 'red'))
+    print(colored("/msg username1,username2,... message", 'yellow') + colored(" to send private messages", 'red'))
+    print(colored("/clients", 'yellow') + colored(" to display current clients", 'red'))
+    print(colored("/quit", 'yellow') + colored(" to leave", 'red'))
+    print(colored("Enjoy!\n", 'red'))
 
 def handle_client_update(message_data):
     global clients
