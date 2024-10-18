@@ -13,6 +13,8 @@ from termcolor import colored
 from getpass import getpass
 import ssl
 import certifi
+import aiohttp
+
 
 exit_flag = False
 fingerprint = "N/A"
@@ -313,6 +315,7 @@ def handle_hello_ack(message_data):
     print(colored("Enter anything to send a public chat", 'red'))
     print(colored("/msg username1,username2,... message", 'yellow') + colored(" to send private messages", 'red'))
     print(colored("/clients", 'yellow') + colored(" to display current clients", 'red'))
+    print(colored("/upload (file path)", 'yellow') + colored(" to upload a file to the http server", 'red'))
     print(colored("/quit", 'yellow') + colored(" to leave", 'red'))
     print(colored("Enjoy!\n", 'red'))
 
@@ -347,7 +350,7 @@ async def read_input(queue):
 
 
 
-# Input loop for user to send messages or quit
+# Handle file upload input from the client
 async def client_input_loop(websocket, queue):
     global exit_flag
     global clients
@@ -357,6 +360,9 @@ async def client_input_loop(websocket, queue):
             _, recipient_list, message = command.split(" ", 2)
             recipient_usernames = recipient_list.split(",")
             await send_chat_message(websocket, recipient_usernames, message)
+        elif command.startswith("/upload "):  # Added for file upload
+            _, file_path = command.split(" ", 1)
+            await upload_file(file_path)
         elif command == "/quit":
             print(colored("Exiting...", 'red'))
             await websocket.close()
@@ -387,6 +393,22 @@ async def listen_for_messages(websocket):
             break
         except Exception as e:
             print(f"Error: {e}")
+
+
+# File Upload Functionality -----------------------------------------------------------
+# Allows the client to upload a file to the server via HTTP
+async def upload_file(file_path):
+    url = "http://localhost:8080/api/upload"
+    async with aiohttp.ClientSession() as session:
+        with open(file_path, 'rb') as f:
+            data = {'file': f}
+            async with session.post(url, data=data) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    print(f"File uploaded successfully. URL: {result['file_url']}")
+                else:
+                    print(f"File upload failed with status {resp.status}.")
+
 
 
 # Connect to the server and handle communication
@@ -442,3 +464,5 @@ async def main():
 # Entry point
 if __name__ == "__main__":
     asyncio.run(main())
+
+
