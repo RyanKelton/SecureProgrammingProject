@@ -1,3 +1,8 @@
+# Group Members:
+# Ryan Kelton
+# Jessey Bautista
+# Jake Roberts
+
 import asyncio
 import websockets
 import json
