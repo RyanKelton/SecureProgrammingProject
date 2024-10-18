@@ -13,9 +13,10 @@ import subprocess
 clients = {}
 all_clients = {}
 
-server_url = "ws://localhost:6666"
+server_url = "wss://localhost:6666"
 
 async def send_to_clients(message):
+    global clients, all_clients
     disconnected_clients = []
     for fingerprint, client in clients.items():
         try:
@@ -27,10 +28,21 @@ async def send_to_clients(message):
     # Remove disconnected clients from the list
     for fingerprint in disconnected_clients:
         del clients[fingerprint]
+        del all_clients[fingerprint]
+    if (disconnected_clients != []):
+        await send_client_update()
 
+async def send_client_update():
+    packet = {
+        "type": "client_update",
+        "clients": all_clients
+    }
+    await send_to_clients(json.dumps(packet))
+    print("sent client update")
 
 # Handle "hello" message and store public key
 async def handle_hello_message(websocket, message):
+    global clients, all_clients
     client_data = json.loads(message.get('data', {}))
     public_key_pem = client_data['public_key']
     username = client_data['username']
@@ -43,7 +55,7 @@ async def handle_hello_message(websocket, message):
         fingerprint = base64.b64encode(hashlib.sha256(public_key_pem.encode('utf-8')).digest()).decode('utf-8')
 
         # Store the client's info (WebSocket connection and public key)
-        clients[fingerprint] = {'websocket': websocket, 'public_key': public_key, 'username': username}
+        clients[fingerprint] = {'websocket': websocket, 'public_key': public_key_pem, 'username': username}
         print(f"Client {fingerprint} connected with public key and username: {username}")
 
         # Send back a confirmation message
@@ -55,6 +67,11 @@ async def handle_hello_message(websocket, message):
         }
         await websocket.send(json.dumps(response))
         print("Sent hello message with public key and username.")
+        
+        # Update all_clients
+        all_clients[fingerprint] = {'public_key': public_key_pem, 'username': username, 'server': server_url}
+        await send_client_update()
+        # Update all other servers with client list -------------------------------------------------------------------------------------------------------------------------
 
 # Handle chat messages
 async def handle_chat_message(websocket, message):
@@ -62,10 +79,10 @@ async def handle_chat_message(websocket, message):
     destination_servers = data['destination_servers'] 
     
     if (server_url in destination_servers):
-        send_to_clients(json.dumps(message))
+        await send_to_clients(json.dumps(message))
         destination_servers.remove(server_url)
     
-    for server_urls in destination_servers:
+    for server_urls in list(set(destination_servers)): # For each unique url in list
         continue
         # send to other servers that need it ---------------------------------------------------------------------------------------------------------------------------------
 

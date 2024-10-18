@@ -100,12 +100,11 @@ def decrypt_chat_message(iv_b64, encrypted_chat_b64, aes_key):
 
 
 # ------------------------------------------------- Handling Incoming Packets ---------------------------------------------
-async def handle_chat(data_content):
+def handle_chat(data_content):
     # Get AES key
     symm_keys = data_content["symm_keys"]
     aes_key = decrypt_aes_key(symm_keys)
     if aes_key is None:
-        print("DEBUGGING - message not for us")
         return None
     
     # Decrypt
@@ -114,8 +113,8 @@ async def handle_chat(data_content):
     plaintext_chat = decrypt_chat_message(iv, encrypted_chat, aes_key)
     
     chat_content = json.loads(plaintext_chat)
-    sender = chat_content["participants_username"][0]
-    recipients = chat_content["participants_username"][1:]
+    sender = chat_content["participants_usernames"][0]
+    recipients = chat_content["participants_usernames"][1:]
     recipeints_str = ", ".join(recipients)
     message = chat_content["message"]
     
@@ -134,11 +133,11 @@ def handle_public_chat(data_content):
     
     
 
-async def handle_signed_data(packet):
+def handle_signed_data(packet):
     data_content = json.loads(packet["data"])
     
     if data_content["type"] == "chat":
-        await handle_chat(data_content)
+        handle_chat(data_content)
     elif data_content["type"] == "public_chat":
         handle_public_chat(data_content)
     
@@ -212,10 +211,20 @@ async def send_chat_message(websocket, recipient_usernames, message):
     
     # Gather participants (sender's fingerprint comes first)
     f_prints = [fingerprint]  # Sender's fingerprint
+    invalid_usernames = []
     for recipient_username in recipient_usernames:
+        found = False
         for f_print, client_data in clients.items():
             if client_data["username"] == recipient_username:
                 f_prints.append(f_print)
+                found = True
+                break
+        if not found:
+            print(colored(f"{recipient_username} not found", 'red'))
+            invalid_usernames.append(recipient_username)
+            
+    recipient_usernames = [u for u in recipient_usernames if u not in invalid_usernames]
+            
                 
     # Create the "chat" structure to be encrypted
     chat_structure = {
@@ -262,8 +271,10 @@ def handle_hello_ack(message_data):
     username = message_data['username']
     print(colored("\nConnected to the chat room!\nEnter anything to send a public chat\nUse /msg (username) to send private messages\nUse /quit to leave\nEnjoy!\n", 'red'))
 
-
-
+def handle_client_update(message_data):
+    global clients
+    clients = message_data["clients"]
+    
 # Step 3: Handle incoming messages
 async def handle_incoming_message(message):
     message_data = json.loads(message)
@@ -271,7 +282,9 @@ async def handle_incoming_message(message):
     if (message_type == "hello_ack"):
         handle_hello_ack(message_data)
     elif (message_type == "signed_data"):
-        await handle_signed_data(message_data)
+        handle_signed_data(message_data)
+    elif (message_type == "client_update"):
+        handle_client_update(message_data)
 
 
 
@@ -292,6 +305,7 @@ async def read_input(queue):
 # Step 5: Input loop for user to send messages or quit
 async def client_input_loop(websocket, queue):
     global exit_flag
+    global clients
     while True:
         command = await queue.get()  # Get the command from the queue
         if command.startswith("/msg "):
@@ -303,9 +317,12 @@ async def client_input_loop(websocket, queue):
             await websocket.close()
             exit_flag = True
             break
+        elif command == "/clients":
+            clients_usernames = [sub['username'] for sub in clients.values()]
+            clients_usernames_str = ", ".join(clients_usernames)
+            print(colored(f"Clients: {clients_usernames_str}", 'red'))
         else:
             await send_public_chat_message(websocket, command)
-        
         if exit_flag:
             break
 
