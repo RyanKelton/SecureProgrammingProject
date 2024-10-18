@@ -1,5 +1,10 @@
 ﻿# SecureProgrammingProject
- 
+
+Group Members:
+Ryan Kelton
+Jessey Bautista
+Jake Roberts
+
 README for OLAF Chat Application
 Overview
 
