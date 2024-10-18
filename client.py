@@ -310,7 +310,10 @@ async def send_chat_message(websocket, recipient_usernames, message):
 def handle_hello_ack(message_data):
     global fingerprint, username
     fingerprint = message_data['fingerprint']
-    username = message_data['username']
+    if (username != message_data['username']):
+        username = message_data['username']
+        print(colored(f"\nUsername unavailable. You have been assigned the username: {username}", 'magenta'))
+    
     print(colored("\nConnected to the chat room!", 'red'))
     print(colored("Enter anything to send a public chat", 'red'))
     print(colored("/msg username1,username2,... message", 'yellow') + colored(" to send private messages", 'red'))

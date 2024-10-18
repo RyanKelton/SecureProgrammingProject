@@ -14,6 +14,7 @@ import pathlib
 # Store connected clients and their public keys
 clients = {}
 all_clients = {}
+username_num = 1
 
 server_url = "wss://localhost:6666"
 UPLOAD_DIR = 'uploads'
@@ -52,10 +53,19 @@ async def send_client_update():
 
 # Handle "hello" message and store public key
 async def handle_hello_message(websocket, message):
-    global clients, all_clients
+    global clients, all_clients, username_num
     client_data = json.loads(message.get('data', {}))
     public_key_pem = client_data['public_key']
     username = client_data['username']
+    
+    username = username.replace(',','').replace('#','')
+    
+    # Check if username already exists
+    for client_data in clients.values():
+        if client_data['username'] == username:
+            username = username + '#' + str(username_num)
+            username_num += 1
+            break
 
     if public_key_pem:
         public_key = RSA.import_key(public_key_pem)
