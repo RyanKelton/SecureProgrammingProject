@@ -33,11 +33,11 @@ To use the chat, you can simply just type and enter your message and it will dis
 
 To send a private message, you can use the following format below. clients use the /msg <username> command, where the username is the public key fingerprint.
 Example:
-/msg <username1,username2,...> <message>
+/msg username1,username2,... message
 /msg john_smith,alice_jones Hello!
 
 You can upload a file with
-/upload <file path>
+/upload file path
 
 You can display the current clients with
 /clients
