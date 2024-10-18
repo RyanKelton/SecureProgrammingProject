@@ -20,7 +20,7 @@ exit_flag = False
 fingerprint = "N/A"
 username = ""  # Username as a global variable
 counter = 0 # Counter for replay attack mitigation
-clients = {} # clients[fingerprint] = {public_key, username, server, last_counter}
+clients = {} # clients[fingerprint] = {public_key, username, server}
 public_key_counters = {} #counter_list[public_key] = last_counter
 
 
@@ -346,6 +346,7 @@ async def read_input(queue):
             
             await queue.put(command)
         if exit_flag:
+            await queue.put("/quit")
             break
 
 
@@ -377,10 +378,9 @@ async def client_input_loop(websocket, queue):
         if exit_flag:
             break
 
-
-
 # Listen for incoming messages
 async def listen_for_messages(websocket):
+    global exit_flag
     while True:
         try:
             message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
