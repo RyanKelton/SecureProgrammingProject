@@ -63,14 +63,7 @@ You can display the current clients with
 Notes for Other Groups
 •	Chat application is a work in progress, we have not fully implemented the parts to handle neighbour servers*. So currently it is just one server whilst still adhering to the protocol
 
-•	There are some vulnerabilities in the chat application.
+•	There are some vulnerabilities in the quarantine zip file.
 
-•	We have standardized the OLAF protocol (v1.1.3). This implementation sends RSA public keys as part of the "hello" message and uses the public key's fingerprint to identify clients. Ensure that your client implementation can handle this format.
-
-•	To send private messages, our clients use the /msg <username> command, where the username is the public key fingerprint.
-
-•	The server is responsible for forwarding public and private messages. If you implement a server, make sure to handle WebSocket message forwarding appropriately.
-
-
-![image](https://github.com/user-attachments/assets/3fe45bec-f0ba-4c26-81c2-5b6957bbf62c)
+•	We have standardized the OLAF protocol (v1.2). This implementation sends RSA public keys as part of the "hello" message and uses the public key's fingerprint to identify clients. Ensure that your client implementation can handle this format.
 
