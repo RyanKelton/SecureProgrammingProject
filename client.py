@@ -19,6 +19,7 @@ fingerprint = "N/A"
 username = ""  # Username as a global variable
 counter = 0 # Counter for replay attack mitigation
 clients = {} # clients[fingerprint] = {public_key, username, server, last_counter}
+public_key_counters = {} #counter_list[public_key] = last_counter
 
 
 #  Generate RSA key pair
@@ -54,9 +55,12 @@ def check_auth(packet, sender_public_key):
     counter = packet["counter"]
     data = packet["data"]
     
+    # Ensure the counter is correct (to prevent replay attacks)
+    last_counter = public_key_counters.get(sender_public_key, -1)
+    if (counter <= last_counter):
+        raise ValueError(f"Replay attack detected: counter {counter} is not higher than last know counter {last_counter}.")
     
-    # Ensure the counter is correct (to prevent replay attacks) -------------------------------------------------------------------------------------------------
-    
+    public_key_counters[sender_public_key] = counter
     
     # Recreate the concatenated data and counter for signature verification
     data_counter_concat = data + str(counter)
@@ -253,11 +257,13 @@ async def send_chat_message(websocket, recipient_usernames, message):
                 f_prints.append(f_print)
                 found = True
                 break
-        if not found:
+        if (not found):
             print(colored(f"{recipient_username} not found", 'red'))
             invalid_usernames.append(recipient_username)
             
     recipient_usernames = [u for u in recipient_usernames if u not in invalid_usernames]
+    if (recipient_usernames == []):
+        return
             
                 
     # Create the "chat" structure to be encrypted
@@ -424,7 +430,7 @@ async def main():
     try:
         global username  # Declare username as global
         server_url = input("Enter server WebSocket URL: ")
-        if not server_url:
+        if (not server_url):
             server_url = "wss://localhost:6666"  # Default to localhost if no input
         username = input("Enter your username: ")
         await connect_to_server(server_url)
