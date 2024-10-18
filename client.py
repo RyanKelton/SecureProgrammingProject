@@ -12,6 +12,7 @@ from Crypto.Hash import SHA256
 from termcolor import colored
 from getpass import getpass
 import ssl
+import certifi
 
 exit_flag = False
 fingerprint = "N/A"
@@ -20,7 +21,7 @@ counter = 0 # Counter for replay attack mitigation
 clients = {} # clients[fingerprint] = {public_key, username, server, last_counter}
 
 
-# Step 1: Generate RSA key pair
+#  Generate RSA key pair
 def generate_rsa_key_pair():
     key = RSA.generate(2048)
     private_key = key.export_key()  # PEM format private key
@@ -275,7 +276,7 @@ def handle_client_update(message_data):
     global clients
     clients = message_data["clients"]
     
-# Step 3: Handle incoming messages
+# Handle incoming messages
 async def handle_incoming_message(message):
     message_data = json.loads(message)
     message_type = message_data.get('type')
@@ -302,7 +303,7 @@ async def read_input(queue):
 
 
 
-# Step 5: Input loop for user to send messages or quit
+# Input loop for user to send messages or quit
 async def client_input_loop(websocket, queue):
     global exit_flag
     global clients
@@ -328,7 +329,7 @@ async def client_input_loop(websocket, queue):
 
 
 
-# Step 6: Listen for incoming messages
+# Listen for incoming messages
 async def listen_for_messages(websocket):
     while True:
         try:
@@ -344,29 +345,43 @@ async def listen_for_messages(websocket):
             print(f"Error: {e}")
 
 
-# Step 7: Connect to the server and handle communication
+# Connect to the server and handle communication
 async def connect_to_server(server_url):
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE  # Warning: This disables certificate verification
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    ssl_context.load_verify_locations('cert.pem')
 
-    async with websockets.connect(server_url, ssl=ssl_context) as websocket:
-        # Create a queue for input
-        input_queue = asyncio.Queue()
+    try:
+        # Proper indentation starts here
+        async with websockets.connect(server_url, ssl=ssl_context) as websocket:
+            # Indent the block within async with
+            # Create a queue for input
+            input_queue = asyncio.Queue()
 
-        # Start the input listener
-        asyncio.create_task(read_input(input_queue))
+            # Start the input listener
+            asyncio.create_task(read_input(input_queue))
 
-        # Start the message listener
-        asyncio.create_task(listen_for_messages(websocket))
+            # Start the message listener
+            asyncio.create_task(listen_for_messages(websocket))
 
-        # Step 2: Send "hello" message to introduce the client
-        await send_hello_message(websocket)
+            # Step 2: Send "hello" message to introduce the client
+            await send_hello_message(websocket)
 
-        # Run the input loop in this task
-        await client_input_loop(websocket, input_queue)
+            # Run the input loop in this task
+            await client_input_loop(websocket, input_queue)
+    
+    except ssl.SSLCertVerificationError as e:
+        # Make sure exception handling is properly indented
+        print(colored(f"SSL Certificate Verification failed: {e}", 'red'))
+        print("If you trust this server, you can add its certificate to your trusted certificates.")
+        sys.exit(1)
 
-# Step 8: Main function to start the client
+    except Exception as e:
+        # Same indentation fix for the second exception
+        print(colored(f"Connection failed: {e}", 'red'))
+        sys.exit(1)
+
+
+# Main function to start the client
 async def main():
     try:
         global username  # Declare username as global
